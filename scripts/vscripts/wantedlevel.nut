@@ -126,7 +126,7 @@ function ChangeHeat(amount)
     {
         SetWantedLevel(5);
         maxAllowedVehicles = 4;
-        threatlevel = eThreats.iSwat | eThreats.iMilitary | eThreats.iPolice
+        threatLevel = eThreats.iSwat | eThreats.iMilitary | eThreats.iPolice
     }
     else if (wantedHeat >= 800 && wantedLevel < 4) 
     {
@@ -162,7 +162,7 @@ function SetHeat(amount)
     {
         SetWantedLevel(5);
         maxAllowedVehicles = 4;
-        threatlevel = eThreats.iSwat | eThreats.iMilitary | eThreats.iPolice
+        threatLevel = eThreats.iSwat | eThreats.iMilitary | eThreats.iPolice
     }
     else if (wantedHeat >= 800 && wantedLevel < 4) 
     {
