@@ -47,11 +47,12 @@ local paintJobs = [
 local wantedLevelScript = Entities.FindByName(null, "script_wantedlevel"); //add only if you want police chases.
 
 local AIType = 0;
+local AIPatroling = false; //if we lost sigh of suspect start patrolling, ony valid if AIType set to 0.
 local AIActive = true;
 local searchRadius = 1000;
 local despawnRadius = 2000;
 local despawnIfNoEnemy = true;
-local nextWayPointTimer = 0.5;
+local nextWayPointTimer = 1.0;
 local stuckTimer = 5.0;
 local tryingToGetUnstuck = false;
 local myLastOriginTimer = 2.0;
@@ -103,10 +104,14 @@ local isDestroyed = false;
 
 PrecacheSound("sfx/vehicles/police_siren02.wav");
 
-local thrustForward = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_forward", spawnflags = 26, forcetime = 0, force = 8000, attach1 = self.GetName(), angles = Vector(0, -180, 0)});
-local thrustBackward = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_backward", spawnflags = 26, forcetime = 0, force = 8000, attach1 = self.GetName(), angles = Vector(0, 0, 0)});
-local thrustLeft = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_left", spawnflags = 44, forcetime = 0, force = 17000 * 5, attach1 = self.GetName(), angles = Vector(0, -90, 0)});
-local thrustRight = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_right", spawnflags = 44, forcetime = 0, force = 17000 * 5, attach1 = self.GetName(), angles = Vector(0, -270, 0)});
+local ignoreMass = 16; //temp fucking fix to prevent swat vehicles roll over.
+
+if(self.GetModelName() == "models/tspvehicles/swatvan_body.mdl") ignoreMass = 0;
+
+local thrustForward = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_forward", spawnflags = 26, forcetime = 0, force = 12000, attach1 = self.GetName(), angles = Vector(0, -180, 0)});
+local thrustBackward = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_backward", spawnflags = 26, forcetime = 0, force = 12000, attach1 = self.GetName(), angles = Vector(0, 0, 0)});
+local thrustLeft = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_left", spawnflags = 44 + ignoreMass, forcetime = 0, force = 20000, attach1 = self.GetName(), angles = Vector(0, -90, 0)});
+local thrustRight = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_right", spawnflags = 44 + ignoreMass, forcetime = 0, force = 20000, attach1 = self.GetName(), angles = Vector(0, -270, 0)});
 local env_weaponfire = null;
 
 //printl(self.GetName());
@@ -630,6 +635,41 @@ function UpdateStuckStatus()
     tryingToGetUnstuck = tryingToGetUnstuck == true ? false : true;
 }
 
+function SelectRandomNavFromDistance(minDistance, maxDistance)
+{
+    local startPos = self.GetOrigin()
+    local startArea = NavMesh.GetNavArea(startPos, 200);
+
+    local availableNavs = {};
+    local bestNavAreas = [];
+
+    if (startArea == null)
+    {
+        return null;
+    }
+
+    NavMesh.GetNavAreasInRadius(startArea.GetCenter(), maxDistance, availableNavs);
+
+    foreach (navmesh in availableNavs)
+    {
+        local navCenter = navmesh.GetCenter();
+        local dist = (navCenter - startPos).Length2D();
+            
+        if (dist >= minDistance && dist <= maxDistance && (navmesh.GetAttributes() & 536870912) == 0) //navs marked with LYINGDOWN is forbidden.
+        {
+            bestNavAreas.push(navmesh);
+        }
+    }
+        
+    if (bestNavAreas.len() > 0)
+    {
+        return bestNavAreas[RandomInt(0, bestNavAreas.len() - 1)];
+    }
+
+    return null;
+}
+
+
 function AIUpdateNavigation()
 {
     if (currentWayPoint == null) return;
@@ -856,7 +896,7 @@ function VehicleThink()
                     //DebugDrawBox(currentWayPoint, Vector(-10, -10, 10), Vector(10, 10, 10), 255, 255, 255, 255, 1.0);
                     if(AIType == 0)
                     {
-                        //EmitAmbientSoundOn("sfx/vehicles/police_siren02.wav", 2, 85, RandomInt(90, 110), self); //too annoying.
+                        EmitAmbientSoundOn("sfx/vehicles/police_siren02.wav", 10, 30, RandomInt(90, 110), self); //too annoying.
                     }
 
                     currentEnemy = nearbyCriminal;
@@ -881,38 +921,53 @@ function VehicleThink()
         {
             if(nextWayPointTimer <= 0)
             {
-                nextWayPointTimer = 0.5;
+                nextWayPointTimer = 1.0;
                 currentWayPoint = currentEnemy.GetOrigin();
                 //DebugDrawBox(currentWayPoint, Vector(-10, -10, 10), Vector(10, 10, 10), 255, 255, 255, 255, 1.0);
             }
 
-            local closestPlayer = null
-            local nearbySurvivorFound = false;
-
-            foreach(surv in GetSurvivors())
+            if(!AIPatroling)
             {
-                if(GetDistance(surv, self) <= despawnRadius)
+                local closestPlayer = null
+                local nearbySurvivorFound = false;
+
+                foreach(surv in GetSurvivors())
                 {
-                    nearbySurvivorFound = true;
-                    break;
+                    if(GetDistance(surv, self) <= despawnRadius)
+                    {
+                        nearbySurvivorFound = true;
+                        break;
+                    }
                 }
-            }
 
-            if (!nearbySurvivorFound)
+                if (!nearbySurvivorFound)
+                {
+                    //printl("despawning police vehicle.");
+                    BlowUpVehicle();
+                    AddThinkToEnt(self, "");
+                    return;
+                }
+
+                AIUpdateNavigation()
+
+                if(EnemyOutsideOfCar() && EnemyNearby() && AIType == 0)
+                {
+                    SpawnInfectedAndStopTheCar();
+                }
+                nextWayPointTimer -= 0.05;
+            }   
+            
+            else 
             {
-                printl("despawning police vehicle.");
-                BlowUpVehicle();
-                AddThinkToEnt(self, "");
-                return;
-            }
-
-            AIUpdateNavigation()
-
-            if(EnemyOutsideOfCar() && EnemyNearby() && AIType == 0)
-            {
-                SpawnInfectedAndStopTheCar();
-            }
-            nextWayPointTimer -= 0.05;
+                StopAmbientSoundOn("sfx/vehicles/police_siren02.wav", self);
+                local patrolArea = SelectRandomNavFromDistance(500, 1000);
+                if(patrolArea != null)
+                {
+                    currentWayPoint = patrolArea.GetCenter()
+                    AIUpdateNavigation()
+                    nextWayPointTimer -= 0.05;
+                }
+            }   
         }
     }
 
@@ -934,6 +989,11 @@ function SetAIConfig(_ai = 0, searchRad = 1000, infected = 8, infamount = 2)
     searchRadius = searchRad; //1000 is ideal.
     infectedType = infected; //1 = SMOKER, 2 = BOOMER, 3 = HUNTER, 4 = SPITTER, 5 = JOCKEY, 6 = CHARGER, 7 = WITCH (really?), 8 = TANK
     howManyInfected = infamount; //never should be 0
+}
+
+function SetPatrolConfig(patrol = 0)
+{
+    AIPatroling = patrol == 1 ? true : false;
 }
 
 function SetVehicleGasConfig(maxGas = 300, currentGas = 300, gasPerCan = 180)

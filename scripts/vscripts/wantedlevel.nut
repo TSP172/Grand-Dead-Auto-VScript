@@ -9,6 +9,9 @@ wantedLevel <- 0;
 wantedHeat  <- 0; //crime points
 threatLevel <- 1; //bit mask
 policeCarelessLevel <- 0.7 //how careless the police are / how unlikely the wanted level will be attained?
+allSurvivorsHiding <- false; //are survivors currently hiding?
+cooldownTime <- 50.0; //cooldown time to clear wanted level
+cooldownBegun <- false;
 
 wantedlevelHud <- EntityGroup[0]; //env_screenoverlay entity
 policeCarSpawner <- EntityGroup[1]; //env_entity_maker with ordinary police car
@@ -62,7 +65,7 @@ local vehicleModels = {
     //other driveables yet to be added.
 }
 
-EntFire(wantedlevelHud.GetName(), "StopOverlays", "", 0.05, null);
+EntFire(wantedlevelHud.GetName(), "StopOverlays", "", 1.0, null);
 
 function PrecacheSoundAssets()
 {
@@ -125,25 +128,25 @@ function ChangeHeat(amount)
     if (wantedHeat >= 1200 && wantedLevel < 5) 
     {
         SetWantedLevel(5);
-        maxAllowedVehicles = 4;
+        maxAllowedVehicles = 5;
         threatLevel = eThreats.iSwat | eThreats.iMilitary | eThreats.iPolice
     }
     else if (wantedHeat >= 800 && wantedLevel < 4) 
     {
         SetWantedLevel(4);
-        maxAllowedVehicles = 3;
+        maxAllowedVehicles = 4;
         threatLevel = eThreats.iSwat | eThreats.iPolice
     }
     else if (wantedHeat >= 500 && wantedLevel < 3) 
     {
         SetWantedLevel(3);
-        maxAllowedVehicles = 2;
+        maxAllowedVehicles = 3;
         threatLevel = eThreats.iPolice
     }
     else if (wantedHeat >= 250 && wantedLevel < 2) 
     {
         SetWantedLevel(2);
-        maxAllowedVehicles = 1;
+        maxAllowedVehicles = 2;
         threatLevel = eThreats.iPolice
     }
     else if (wantedHeat >= 100 && wantedLevel < 1) 
@@ -161,25 +164,25 @@ function SetHeat(amount)
     if (wantedHeat >= 1200 && wantedLevel < 5) 
     {
         SetWantedLevel(5);
-        maxAllowedVehicles = 4;
+        maxAllowedVehicles = 5;
         threatLevel = eThreats.iSwat | eThreats.iMilitary | eThreats.iPolice
     }
     else if (wantedHeat >= 800 && wantedLevel < 4) 
     {
         SetWantedLevel(4);
-        maxAllowedVehicles = 3;
+        maxAllowedVehicles = 4;
         threatLevel = eThreats.iSwat | eThreats.iPolice
     }
     else if (wantedHeat >= 500 && wantedLevel < 3) 
     {
         SetWantedLevel(3);
-        maxAllowedVehicles = 2;
+        maxAllowedVehicles = 3;
         threatLevel = eThreats.iPolice
     }
     else if (wantedHeat >= 250 && wantedLevel < 2) 
     {
         SetWantedLevel(2);
-        maxAllowedVehicles = 1;
+        maxAllowedVehicles = 2;
         threatLevel = eThreats.iPolice
     }
     else if (wantedHeat >= 100 && wantedLevel < 1) 
@@ -289,6 +292,7 @@ function GeneratePoliceScannerQuote(criminalLocation = Vector(0,0,0), code = 0, 
     if (inFoot == 1)
     {
         DoEntFire("!self", "RunScriptCode", "SayTheSound(4, 0)", delay4, null, self);
+        DoEntFire("!self", "RunScriptCode", "RadioStatic(0)", delay4 + 1.0, null, self);
     }
     else 
     {
@@ -331,12 +335,10 @@ function GetCriminalProfile(criminalID, code = 7) // default (7 = 10-71)
     local vehicleIdx = GetPlayerVehicle(criminal);
     local isOnFoot = (vehicleIdx == null) ? 1 : 0;
     
-    // If on foot, vehicleIdx defaults to 0
     if (isOnFoot == 1) vehicleIdx = 0;
 
     printl("[POLICE SCANNER] Reporting player: On Foot: " + isOnFoot + " | Vehicle ID: " + vehicleIdx);
 
-    // Trigger the radio scanner quote assembly
     GeneratePoliceScannerQuote(criminalPos, code, 0, isOnFoot, vehicleIdx);
 }
 
@@ -358,8 +360,60 @@ function LookForNearestSpawnPoint() //doesnt use this anymore.
     return spawnPoint;
 }
 
-function SelectRandomNavFromDistance(minDistance, maxDistance, survivor)
+function SurvivorsHiding(_toggle = 0)
+{
+    allSurvivorsHiding = _toggle == 1 ? true : false;
+
+    local ent = null;
+    while ((ent = Entities.FindByClassname(ent, "prop_physics")) != null)
     {
+        if (ent.IsValid() && ent.ValidateScriptScope())
+        {
+            local policeScope = ent.GetScriptScope();
+            
+            if (policeScope != null && "SetPatrolConfig" in policeScope)
+            {
+                DoEntFire("!self", "RunScriptCode", "SetPatrolConfig(" + _toggle + ")", 0.00, null, ent);
+            }
+        }
+    }
+}
+
+function DeletePoliceVehicles()
+{
+    local ent = null;
+    while ((ent = Entities.FindByClassname(ent, "prop_physics")) != null)
+    {
+        if (ent.IsValid() && ent.ValidateScriptScope())
+        {
+            local policeScope = ent.GetScriptScope();
+            
+            if (policeScope != null)
+            {
+                if ("BlowUpVehicle" in policeScope)
+                {
+                    DoEntFire("!self", "RunScriptCode", "BlowUpVehicle()", 0.02, null, ent);
+                }
+                else
+                {
+                    DoEntFire("!self", "FireUser1", "", 0.02, null, ent);
+                }
+            }
+        }
+    }
+    activePursuitVehicles = 0; 
+}
+
+function WantedStarsBlink()
+{
+    EntFire(wantedlevelHud.GetName(), "StopOverlays", "", 0.0, null);
+    EntFire(wantedlevelHud.GetName(), "StartOverlays", "", 0.5, null);
+    EntFire(wantedlevelHud.GetName(), "StopOverlays", "", 1.0, null);
+    EntFire(wantedlevelHud.GetName(), "StartOverlays", "", 1.5, null);
+}
+
+function SelectRandomNavFromDistance(minDistance, maxDistance, survivor)
+{
     if(survivor == null) return;
     local startPos = survivor.GetOrigin()
     local startArea = NavMesh.GetNavArea(startPos, 200);
@@ -395,6 +449,35 @@ function SelectRandomNavFromDistance(minDistance, maxDistance, survivor)
 
 function WantedLevelThink()
 {
+    if (wantedLevel != 0 && allSurvivorsHiding)
+    {
+        WantedStarsBlink();
+        cooldownBegun = true;
+        cooldownTime -= 2.0;
+        
+        if (cooldownTime <= 0)
+        {
+            printl("Wanted level cleared");
+            
+            EntFire(wantedlevelHud.GetName(), "StopOverlays", "", 2.1, null); 
+            
+            DeletePoliceVehicles();
+            SetHeat(0);
+            wantedLevel = 0;
+            cooldownBegun = false;
+            cooldownTime = 50.0;
+        }
+        return 2.0;
+    }
+
+    else if (!allSurvivorsHiding && cooldownBegun && wantedLevel != 0)
+    {
+        EntFire(wantedlevelHud.GetName(), "StartOverlays", "", 0, null);
+        cooldownBegun = false;
+        cooldownTime = 50.0;
+        return 0.1;
+    }
+
     if(wantedLevel != 0 && wantedLevelEnabled)
     {
         local nearestSpawnPoint = SelectRandomNavFromDistance(950, 1600, GetRandomSurvivor())
@@ -403,26 +486,6 @@ function WantedLevelThink()
             if (activePursuitVehicles >= maxAllowedVehicles) return;
 
             local availableSpawners = [];
-            /*
-            if (wantedLevel <= 3)
-            {
-                threatLevel = 1; // Only Police Car
-                availableSpawners.push(policeCarSpawner);
-            }
-            else if (wantedLevel > 3)
-            {
-                threatLevel = 3; // Swat + police car
-                availableSpawners.push(policeCarSpawner);
-                availableSpawners.push(swatCarSpawner);
-            }
-            else if (wantedLevel > 4)
-            {
-                threatLevel = 7; // Police + SWAT + Tank
-                availableSpawners.push(policeCarSpawner);
-                availableSpawners.push(swatCarSpawner);
-                availableSpawners.push(tankCarSpawner);
-            }
-            */
 
             //printl(threatLevel);
 
@@ -446,7 +509,7 @@ function WantedLevelThink()
                 availableSpawners.push(tankCarSpawner);
             }
 
-            printl(availableSpawners)
+            //printl(availableSpawners)
 
             if (availableSpawners.len() == 0) return;
 
@@ -455,6 +518,7 @@ function WantedLevelThink()
             if (selectedSpawner != null && selectedSpawner.IsValid())
             {
                 selectedSpawner.SetOrigin(nearestSpawnPoint.GetCenter() + Vector(0, 0, 10));
+                selectedSpawner.SetAngles(QAngle(0, RandomInt(0, 360), 0));
                 DoEntFire("!self", "ForceSpawn", "", 0.02, null, selectedSpawner);
                 activePursuitVehicles++;
             }
