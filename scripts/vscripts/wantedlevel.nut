@@ -447,6 +447,22 @@ function SelectRandomNavFromDistance(minDistance, maxDistance, survivor)
     return null;
 }
 
+function SpawnPoliceCar(spawnPoint)
+{
+    if (selectedSpawner == null || !selectedSpawner.IsValid()) return;
+
+    selectedSpawner.SetOrigin(spawnPoint.GetCenter() + Vector(0, 0, 10));
+    
+    selectedSpawner.SetAngles(QAngle(0, RandomInt(0, 360), 0)); 
+    
+    // Force the entity template to spawn the car
+    DoEntFire("!self", "ForceSpawn", "", 0.0, null, selectedSpawner);
+
+    DoEntFire("!self", "RunScriptCode", "InitializeSpawnedCarThrusters()", 0.05, null, selectedSpawner);
+    
+    activePursuitVehicles++;
+}
+
 function WantedLevelThink()
 {
     if (wantedLevel != 0 && allSurvivorsHiding)
@@ -518,7 +534,7 @@ function WantedLevelThink()
             if (selectedSpawner != null && selectedSpawner.IsValid())
             {
                 selectedSpawner.SetOrigin(nearestSpawnPoint.GetCenter() + Vector(0, 0, 10));
-                selectedSpawner.SetAngles(QAngle(0, RandomInt(0, 360), 0));
+                //selectedSpawner.SetAngles(QAngle(0, RandomInt(0, 360), 0)); //<- this fucks up the thrusters...
                 DoEntFire("!self", "ForceSpawn", "", 0.02, null, selectedSpawner);
                 activePursuitVehicles++;
             }

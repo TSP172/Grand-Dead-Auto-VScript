@@ -108,10 +108,10 @@ local ignoreMass = 16; //temp fucking fix to prevent swat vehicles roll over.
 
 if(self.GetModelName() == "models/tspvehicles/swatvan_body.mdl") ignoreMass = 0;
 
-local thrustForward = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_forward", spawnflags = 26, forcetime = 0, force = 12000, attach1 = self.GetName(), angles = Vector(0, -180, 0)});
+local thrustForward = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_forward", spawnflags = 26, forcetime = 0, force = 12000, attach1 = self.GetName(), angles = Vector(0, 180, 0)});
 local thrustBackward = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_backward", spawnflags = 26, forcetime = 0, force = 12000, attach1 = self.GetName(), angles = Vector(0, 0, 0)});
-local thrustLeft = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_left", spawnflags = 44 + ignoreMass, forcetime = 0, force = 20000, attach1 = self.GetName(), angles = Vector(0, -90, 0)});
-local thrustRight = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_right", spawnflags = 44 + ignoreMass, forcetime = 0, force = 20000, attach1 = self.GetName(), angles = Vector(0, -270, 0)});
+local thrustLeft = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_left", spawnflags = 44 + ignoreMass, forcetime = 0, force = 32000, attach1 = self.GetName(), angles = Vector(0, -90, 0)});
+local thrustRight = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_right", spawnflags = 44 + ignoreMass, forcetime = 0, force = 32000, attach1 = self.GetName(), angles = Vector(0, -270, 0)});
 local env_weaponfire = null;
 
 //printl(self.GetName());
@@ -319,7 +319,6 @@ function ForceBotsGetOutVehicle()
 
 function SetSeatOrigins(driverOrigin, passanger1Available = 0, passanger1Origin = null, passanger2Available = 0, passanger2Origin = null, passanger3Available = 0, passanger3Origin = null) 
 {
-    // Pass raw relative vectors here (e.g. Vector(15, -20, 10))
     driverSeatOffset = driverOrigin;
     if(passanger1Available == 1 && passanger1Origin != null) passangerSeat1Offset = passanger1Origin;
     if(passanger2Available == 1 && passanger2Origin != null) passangerSeat2Offset = passanger2Origin;
@@ -670,6 +669,8 @@ function SelectRandomNavFromDistance(minDistance, maxDistance)
 }
 
 
+const PI = 3.141592653589793;
+
 function AIUpdateNavigation()
 {
     if (currentWayPoint == null) return;
@@ -683,48 +684,49 @@ function AIUpdateNavigation()
     if (distance < 1.0) return;
     dirToTarget.Norm();
 
-    if(tryingToGetUnstuck)
+    local carName = self.GetName();
+
+    if (tryingToGetUnstuck)
     {
-        DoEntFire("!self", "Deactivate", "", 0.0, null, thrustForward);
-        DoEntFire("!self", "Activate", "", 0.0, null, thrustBackward);
-        DoEntFire("!self", "Activate", "", 0.0, null, thrustRight);
-        DoEntFire("!self", "Deactivate", "", 0.0, null, thrustLeft);
+        printl("trying to get unstuck");
+        DoEntFire(carName + "_forward", "Deactivate", "", 0.0, null, self);
+        DoEntFire(carName + "_backward", "Activate", "", 0.0, null, self);
+        DoEntFire(carName + "_right", "Activate", "", 0.0, null, self);
+        DoEntFire(carName + "_left", "Deactivate", "", 0.0, null, self);
         return;
     }
 
     local forwardVec = self.GetForwardVector();
     forwardVec.z = 0.0; forwardVec.Norm();
 
-    // 1. Calculate angles in degrees
-    local targetAngle  = atan2(dirToTarget.y, dirToTarget.x) * (180.0 / 3.14159265);
-    local forwardAngle = atan2(forwardVec.y, forwardVec.x) * (180.0 / 3.14159265);
+    local targetAngle  = atan2(dirToTarget.y, dirToTarget.x) * (180.0 / PI);
+    local forwardAngle = atan2(forwardVec.y, forwardVec.x) * (180.0 / PI);
 
-    // 2. Relative angle offset (-180 to +180)
     local deltaAngle = targetAngle - forwardAngle;
     while (deltaAngle > 180.0)  deltaAngle -= 360.0;
     while (deltaAngle < -180.0) deltaAngle += 360.0;
 
-    // Thresholds
-    local turnAngleThreshold = 30.0;  // Deadzone around nose center
-    local reverseAngleCutoff = 110.0; // Angle threshold to engage reverse gear
+    local turnAngleThreshold = 30.0;  
+    local reverseAngleCutoff = 110.0; 
 
-    if(myLastOrigin != null)
+    if (myLastOrigin != null)
     {
-        if(myLastOriginTimer <= 0)
+        if (myLastOriginTimer <= 0)
         {
             myLastOriginTimer = 2.0;
             myLastOrigin = self.GetOrigin();
         }
         else 
         {
-            if(GetDistanceVector(myLastOrigin, self.GetOrigin()) < 25)
+            if (GetDistanceVector(myLastOrigin, self.GetOrigin()) < 25)
             {
                 stuckTimer -= 0.05;
             }
-            if(stuckTimer <= 0)
+            if (stuckTimer <= 0)
             {
                 stuckTimer = 5.0;
                 printl("WE ARE STUCK!");
+                tryingToGroupUnstuck <- true;
                 tryingToGetUnstuck = true;
                 DoEntFire("!self", "RunScriptCode", "UpdateStuckStatus()", 2.00, null, self);
                 return;
@@ -736,52 +738,48 @@ function AIUpdateNavigation()
         myLastOrigin = self.GetOrigin();
     }
 
-    // 3. Drive Logic (Fixed Nose-Forward Alignment)
     if (abs(deltaAngle) <= reverseAngleCutoff)
     {
-        // --- FORWARD MODE (Nose towards waypoint) ---
-        DoEntFire("!self", "Activate", "", 0.0, null, thrustForward);
-        DoEntFire("!self", "Deactivate", "", 0.0, null, thrustBackward);
 
-        // Positive deltaAngle = Waypoint is to the LEFT
-        // Negative deltaAngle = Waypoint is to the RIGHT
+        DoEntFire(carName + "_forward", "Activate", "", 0.0, null, self);
+        DoEntFire(carName + "_backward", "Deactivate", "", 0.0, null, self);
+
         if (deltaAngle > turnAngleThreshold)
         {
-            DoEntFire("!self", "Activate", "", 0.0, null, thrustRight);
-            DoEntFire("!self", "Deactivate", "", 0.0, null, thrustLeft);
+
+            DoEntFire(carName + "_right", "Activate", "", 0.0, null, self);
+            DoEntFire(carName + "_left", "Deactivate", "", 0.0, null, self);
         }
         else if (deltaAngle < -turnAngleThreshold)
         {
-            DoEntFire("!self", "Activate", "", 0.0, null, thrustLeft);
-            DoEntFire("!self", "Deactivate", "", 0.0, null, thrustRight);
+            DoEntFire(carName + "_left", "Activate", "", 0.0, null, self);
+            DoEntFire(carName + "_right", "Deactivate", "", 0.0, null, self);
         }
         else
         {
-            DoEntFire("!self", "Deactivate", "", 0.0, null, thrustLeft);
-            DoEntFire("!self", "Deactivate", "", 0.0, null, thrustRight);
+            DoEntFire(carName + "_left", "Deactivate", "", 0.0, null, self);
+            DoEntFire(carName + "_right", "Deactivate", "", 0.0, null, self);
         }
     }
     else
     {
-        // --- REVERSE MODE (Target is directly behind) ---
-        DoEntFire("!self", "Deactivate", "", 0.0, null, thrustForward);
-        DoEntFire("!self", "Activate", "", 0.0, null, thrustBackward);
+        DoEntFire(carName + "_forward", "Deactivate", "", 0.0, null, self);
+        DoEntFire(carName + "_backward", "Activate", "", 0.0, null, self);
 
-        // When reversing, reverse steering polarity so rear swings toward target
         if (deltaAngle > turnAngleThreshold)
         {
-            DoEntFire("!self", "Activate", "", 0.0, null, thrustLeft);
-            DoEntFire("!self", "Deactivate", "", 0.0, null, thrustRight);
+            DoEntFire(carName + "_left", "Activate", "", 0.0, null, self);
+            DoEntFire(carName + "_right", "Deactivate", "", 0.0, null, self);
         }
         else if (deltaAngle < -turnAngleThreshold)
         {
-            DoEntFire("!self", "Activate", "", 0.0, null, thrustRight);
-            DoEntFire("!self", "Deactivate", "", 0.0, null, thrustLeft);
+            DoEntFire(carName + "_right", "Activate", "", 0.0, null, self);
+            DoEntFire(carName + "_left", "Deactivate", "", 0.0, null, self);
         }
         else
         {
-            DoEntFire("!self", "Deactivate", "", 0.0, null, thrustLeft);
-            DoEntFire("!self", "Deactivate", "", 0.0, null, thrustRight);
+            DoEntFire(carName + "_left", "Deactivate", "", 0.0, null, self);
+            DoEntFire(carName + "_right", "Deactivate", "", 0.0, null, self);
         }
     }
 }
@@ -796,10 +794,12 @@ function SpawnInfectedAndStopTheCar()
         ang = QAngle(0, RandomInt(0, 360), 0)
         })
     }
-    DoEntFire("!self", "Deactivate", "", 0.0, null, thrustLeft);
-    DoEntFire("!self", "Deactivate", "", 0.0, null, thrustRight);
+
     DoEntFire("!self", "Deactivate", "", 0.0, null, thrustForward);
     DoEntFire("!self", "Deactivate", "", 0.0, null, thrustBackward);
+    DoEntFire("!self", "Deactivate", "", 0.0, null, thrustLeft);
+    DoEntFire("!self", "Deactivate", "", 0.0, null, thrustRight);
+    
     StopAmbientSoundOn("sfx/vehicles/police_siren02.wav", self);
     if(env_weaponfire != null)
     {
@@ -870,10 +870,10 @@ function VehicleThink()
         }
         ToggleEngine(0)
     }
-
+    /*
     if (isBurning && !isDestroyed)
     {
-        currentVehicleHealth -= 0.5;
+        //currentVehicleHealth -= 0.5;
         //printl(currentVehicleHealth);
         if (currentVehicleHealth <= 0)
         {
@@ -881,6 +881,7 @@ function VehicleThink()
             return -1;
         }
     }
+    */
 
     if(playersInVehicle.driver == null)
     {
