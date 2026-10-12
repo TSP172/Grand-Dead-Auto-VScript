@@ -8,6 +8,8 @@ L4D2 VScript mod that includes driveable vehicle, wanted level system and police
 - Radio Station system
 - Wanted level system
 - Hostile AI (Police)
+- Fleeing/Coward AI (can be used for custom scenarios)
+- Neutral/Freeroam AI (can be used for detailing)
 - Nav mesh spawning and despawning
 - Marking forbidden spawn areas as "LYING_DOWN" Left 4 Dead 2 Nav Attribute.
 
