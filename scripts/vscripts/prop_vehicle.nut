@@ -50,6 +50,7 @@ local radioTracks = [
     {musicPath = "#radiomusic/growsup_djquads.mp3", length = 210, title = "DJ Quads - Grows Up"},
     {musicPath = "#radiomusic/heyyou.mp3", length = 225, title = "Hey You - The Rock Steady Crew"},
     {musicPath = "#radiomusic/hookedonafeeling.mp3", length = 170, title = "Hooked on a Feeling"},
+    {musicPath = "#radiomusic/ruletheworld.mp3", length = 250, title = "Everybody Wants to Rule the World"},
     {musicPath = "#radiomusic/michaeljackson_dontstop.mp3", length = 255, title = "Michael Jackson - Don't Stop 'Til You Get Enough"},
     {musicPath = "#radiomusic/myway.mp3", length = 275, title = "My Way"},
     {musicPath = "#radiomusic/nevertoomuch.mp3", length = 230, title = "Never Too Much"},

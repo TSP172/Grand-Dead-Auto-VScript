@@ -46,7 +46,8 @@ local paintJobs = [
 
 local wantedLevelScript = Entities.FindByName(null, "script_wantedlevel"); //add only if you want police chases.
 
-local AIType = 0;
+local AIType = 0; 
+//AT MODES: 0 = Police/Law, 1 = Enemy, 2 = Avoid/Escape, 3 = Scripted, 4 = Neutral.
 local AIPatroling = false; //if we lost sigh of suspect start patrolling, ony valid if AIType set to 0.
 local AIActive = true;
 local searchRadius = 1000;
@@ -58,15 +59,15 @@ local tryingToGetUnstuck = false;
 local myLastOriginTimer = 2.0;
 local myLastOrigin = null;
 local currentWayPoint = null;
+local currentWayPointC = []; //only for Neutral or Scripted ones.
+local currentPathIndex = 0;
 local currentEnemy = null;
 local infectedType = 8;
 local howManyInfected = 2; //never should be 0
-/* AI TYPES:
-0 = Police: spawns enemy infected after survivors that OUTSIDE of the vehicle nearby (prefered tanks)
-1 = Hit & Run: contuniously runs over target survivors, in vehicle or not.
 
-NOTE: the vehicle will not be controlled by AI if the driver is infected player (versus)
-*/
+local turnAngleThreshold = 20.0;  
+local reverseAngleCutoff = 90.0; 
+
 
 //=========== VEHICLE CONFIG ===========//
 local playersInVehicle = 
@@ -104,14 +105,34 @@ local isDestroyed = false;
 
 PrecacheSound("sfx/vehicles/police_siren02.wav");
 
-local ignoreMass = 16; //temp fucking fix to prevent swat vehicles roll over.
+local lawVehicles = ["models/tspvehicles/policecruiser_body.mdl", "models/tspvehicles/swatvan_body.mdl", "models/tspvehicles/apctank01_body.mdl"];
 
+function IsLawVehicle()
+{
+    local myModel = self.GetModelName();
+    printl("[DEBUG] Checking model: " + myModel); // Prints what the engine sees
+
+    foreach (modelPath in lawVehicles)
+    {
+        if (myModel == modelPath)
+        {
+            printl("this is a law vehicle");
+            return true;
+        }
+    }
+    return false;
+}
+
+local ignoreMass = 16; //temp fucking fix to prevent swat vehicles roll over.
+local thrustPower = 12000;
+
+if(!IsLawVehicle()) thrustPower = 3000;
 if(self.GetModelName() == "models/tspvehicles/swatvan_body.mdl") ignoreMass = 0;
 
-local thrustForward = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_forward", spawnflags = 26, forcetime = 0, force = 12000, attach1 = self.GetName(), angles = Vector(0, 180, 0)});
-local thrustBackward = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_backward", spawnflags = 26, forcetime = 0, force = 12000, attach1 = self.GetName(), angles = Vector(0, 0, 0)});
-local thrustLeft = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_left", spawnflags = 44 + ignoreMass, forcetime = 0, force = 32000, attach1 = self.GetName(), angles = Vector(0, -90, 0)});
-local thrustRight = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_right", spawnflags = 44 + ignoreMass, forcetime = 0, force = 32000, attach1 = self.GetName(), angles = Vector(0, -270, 0)});
+local thrustForward = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_forward", spawnflags = 26, forcetime = 0, force = thrustPower, attach1 = self.GetName(), angles = Vector(0, 180, 0)});
+local thrustBackward = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_backward", spawnflags = 26, forcetime = 0, force = thrustPower, attach1 = self.GetName(), angles = Vector(0, 0, 0)});
+local thrustLeft = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_left", spawnflags = 44 + ignoreMass, forcetime = 0, force = thrustPower * 2.5, attach1 = self.GetName(), angles = Vector(0, -90, 0)});
+local thrustRight = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_right", spawnflags = 44 + ignoreMass, forcetime = 0, force = thrustPower * 2.5, attach1 = self.GetName(), angles = Vector(0, -270, 0)});
 local env_weaponfire = null;
 
 //printl(self.GetName());
@@ -633,6 +654,10 @@ function UpdateStuckStatus()
 {
     tryingToGetUnstuck = tryingToGetUnstuck == true ? false : true;
 }
+function ClearStuckStatus()
+{
+    tryingToGetUnstuck = false;
+}
 
 function SelectRandomNavFromDistance(minDistance, maxDistance)
 {
@@ -662,7 +687,7 @@ function SelectRandomNavFromDistance(minDistance, maxDistance)
         
     if (bestNavAreas.len() > 0)
     {
-        return bestNavAreas[RandomInt(0, bestNavAreas.len() - 1)];
+        return bestNavAreas[RandomInt(0, bestNavAreas.len() - 1)].GetCenter();
     }
 
     return null;
@@ -675,8 +700,24 @@ function AIUpdateNavigation()
 {
     if (currentWayPoint == null) return;
 
+    local targetPos = currentWayPoint;
+    if (typeof(targetPos) == "instance")
+    {
+        if ("GetCenter" in targetPos) targetPos = targetPos.GetCenter();
+        else if ("GetOrigin" in targetPos) targetPos = targetPos.GetOrigin();
+    }
+
     local myPos = self.GetOrigin();
-    local dirToTarget = currentWayPoint - myPos;
+    local dirToTarget = null;
+
+    if (AIType == 2) //are we fleeing?
+    {
+        dirToTarget = myPos - targetPos;
+    }
+    else //drive toward target
+    {
+        dirToTarget = targetPos - myPos;
+    }
     
     dirToTarget.z = 0.0;
     
@@ -688,11 +729,21 @@ function AIUpdateNavigation()
 
     if (tryingToGetUnstuck)
     {
-        printl("trying to get unstuck");
-        DoEntFire(carName + "_forward", "Deactivate", "", 0.0, null, self);
-        DoEntFire(carName + "_backward", "Activate", "", 0.0, null, self);
+        //printl("trying to get unstuck")
+        if(RandomInt(0, 1) == 0)
+        {
+            DoEntFire(carName + "_forward", "Deactivate", "", 0.0, null, self);
+            DoEntFire(carName + "_backward", "Activate", "", 0.0, null, self);
+        }
+        else
+        {
+            DoEntFire(carName + "_forward", "Activate", "", 0.0, null, self);
+            DoEntFire(carName + "_backward", "Deactivate", "", 0.0, null, self);
+        }
+        
         DoEntFire(carName + "_right", "Activate", "", 0.0, null, self);
         DoEntFire(carName + "_left", "Deactivate", "", 0.0, null, self);
+        DoEntFire("!self", "RunScriptCode", "ClearStuckStatus()", RandomFloat(1.0, 3.0), null, self)
         return;
     }
 
@@ -706,47 +757,49 @@ function AIUpdateNavigation()
     while (deltaAngle > 180.0)  deltaAngle -= 360.0;
     while (deltaAngle < -180.0) deltaAngle += 360.0;
 
-    local turnAngleThreshold = 30.0;  
-    local reverseAngleCutoff = 110.0; 
-
     if (myLastOrigin != null)
     {
+        myLastOriginTimer -= 0.05;
+
         if (myLastOriginTimer <= 0)
         {
             myLastOriginTimer = 2.0;
+            
+            local distanceMoved = (myLastOrigin - self.GetOrigin()).Length();
+            
+            if (distanceMoved < 5.0)
+            {
+                stuckTimer -= 1.0;
+                printl("[STUCK CHECK] Car barely moved (" + distanceMoved + " units). Stuck timer at: " + stuckTimer);
+            }
+            else
+            {
+                stuckTimer = 3.0; 
+            }
+
             myLastOrigin = self.GetOrigin();
         }
-        else 
+
+        if (stuckTimer <= 0)
         {
-            if (GetDistanceVector(myLastOrigin, self.GetOrigin()) < 25)
-            {
-                stuckTimer -= 0.05;
-            }
-            if (stuckTimer <= 0)
-            {
-                stuckTimer = 5.0;
-                printl("WE ARE STUCK!");
-                tryingToGroupUnstuck <- true;
-                tryingToGetUnstuck = true;
-                DoEntFire("!self", "RunScriptCode", "UpdateStuckStatus()", 2.00, null, self);
-                return;
-            }
+            stuckTimer = 3.0;
+            UpdateStuckStatus();
+            return;
         }
     }
     else 
     {
         myLastOrigin = self.GetOrigin();
+        myLastOriginTimer = 2.0;
     }
 
     if (abs(deltaAngle) <= reverseAngleCutoff)
     {
-
         DoEntFire(carName + "_forward", "Activate", "", 0.0, null, self);
         DoEntFire(carName + "_backward", "Deactivate", "", 0.0, null, self);
 
         if (deltaAngle > turnAngleThreshold)
         {
-
             DoEntFire(carName + "_right", "Activate", "", 0.0, null, self);
             DoEntFire(carName + "_left", "Deactivate", "", 0.0, null, self);
         }
@@ -807,6 +860,70 @@ function SpawnInfectedAndStopTheCar()
     }
     CatchOnFire();
     AddThinkToEnt(self, "") //since we got out of car, the car stops thinking
+}
+
+function CreatePathLegacy(navOrigin)
+{   
+    local endArea = NavMesh.GetNavArea(self.GetOrigin(), 120); //reversed because this stupid navareabuildpath function puts in reverse order.
+    local startArea  = NavMesh.GetNavArea(navOrigin, 120);
+
+    if (startArea && endArea)
+    {
+        local tempTable = {}; 
+
+        if (NavMesh.NavAreaBuildPath(startArea, endArea, endArea.GetCenter(), 99999.0, 0, false))
+        {
+            NavMesh.GetNavAreasFromBuildPath(startArea, endArea, endArea.GetCenter(), 99999.0, 0, false, tempTable);
+                
+            currentWayPointC = []; // Clear current path
+                
+            for (local i = 0; i < tempTable.len(); i++)
+            {
+                local key = "area" + i;
+                if (key in tempTable)
+                {
+                    currentWayPointC.push(tempTable[key]);
+                }
+            }
+
+            currentPathIndex = 0;
+        }
+    }
+}
+
+function SetNextPath()
+{
+    local thePath = currentWayPointC;
+
+    if (thePath.len() == 0) 
+    {
+        currentWayPointC.clear();
+        currentWayPoint = null;
+        //CreatePathLegacy(SelectRandomNavFromDistance(2000, 15000));
+        return false;
+    }
+
+    local nextWayPoint = thePath[0];
+        
+    currentWayPoint = nextWayPoint;
+    local targetPos = nextWayPoint;
+    if (typeof(nextWayPoint) == "instance" && !("x" in nextWayPoint)) 
+    {
+        targetPos = nextWayPoint.GetCenter();
+    }
+
+    if ((self.GetOrigin() - targetPos).Length() < 200)
+    {
+        currentWayPointC.remove(0);
+            
+        if (currentWayPointC.len() == 0) 
+        {
+            currentWayPoint = null;
+            //CreatePathLegacy(SelectRandomNavFromDistance(2000, 15000));
+            return false; 
+        }
+    }
+    return true;
 }
 
 function VehicleThink()
@@ -885,7 +1002,7 @@ function VehicleThink()
 
     if(playersInVehicle.driver == null)
     {
-        if(currentEnemy == null) //we dont have enemy??
+        if(currentEnemy == null && AIType < 3) //we dont have enemy??
         {
             currentWayPoint = null;
             local nearbyCriminal = FindEnemy();
@@ -918,7 +1035,7 @@ function VehicleThink()
                 return 0.05;
             }
         }
-        else //we have enemy and in on pursuit.
+        else if (currentEnemy != null && AIType < 3) //we have enemy and in on pursuit.
         {
             if(nextWayPointTimer <= 0)
             {
@@ -941,7 +1058,7 @@ function VehicleThink()
                     }
                 }
 
-                if (!nearbySurvivorFound)
+                if (!nearbySurvivorFound && AIType != 2)
                 {
                     //printl("despawning police vehicle.");
                     BlowUpVehicle();
@@ -970,10 +1087,30 @@ function VehicleThink()
                 }
             }   
         }
+        else if (AIType == 4) //we are wandering/neutral
+        {
+            if(currentWayPointC.len() != 0)
+            {
+                currentWayPoint = currentWayPointC[0].GetCenter();
+                SetNextPath();
+                AIUpdateNavigation();
+                //DebugDrawBox(currentWayPoint, Vector(-10, -10, 10), Vector(10, 10, 10), 255, 255, 255, 255, 1.0);
+            }
+            else 
+            {
+                CreatePathLegacy(SelectRandomNavFromDistance(2000, 15000));
+            }
+        }
+        else //we are scripted or unknown. (stop when there is no where to go.)
+        {
+            SetNextPath()
+            AIUpdateNavigation();
+        }
     }
 
     return 0.05;
 }
+
 function SetRandomPaintJob()
 {
     DoEntFire(self.GetName(), "color", paintJobs[RandomInt(0, paintJobs.len() - 1)], 0.00, null, null);
@@ -986,7 +1123,12 @@ function SetCustomPaintJob(r = 255, g = 255, b = 255)
 
 function SetAIConfig(_ai = 0, searchRad = 1000, infected = 8, infamount = 2)
 {
-    AIType = _ai;
+    AIType = _ai; //AI MODE: 0 = Law, 1 = Enemy, 2 = Flee, 3 = Scripted, 4 = Neutral/Civilian
+    if(AIType > 1)
+    {
+        turnAngleThreshold = 0.0;  
+        reverseAngleCutoff = 70.0; 
+    }
     searchRadius = searchRad; //1000 is ideal.
     infectedType = infected; //1 = SMOKER, 2 = BOOMER, 3 = HUNTER, 4 = SPITTER, 5 = JOCKEY, 6 = CHARGER, 7 = WITCH (really?), 8 = TANK
     howManyInfected = infamount; //never should be 0

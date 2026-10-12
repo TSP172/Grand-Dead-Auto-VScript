@@ -18,8 +18,8 @@ policeCarSpawner <- EntityGroup[1]; //env_entity_maker with ordinary police car
 swatCarSpawner <- EntityGroup[2]; //env_entity_maker with SWAT Van
 tankCarSpawner <- EntityGroup[3]; //env_entity_maker with a literally fucking tank.
 
-const pursuitTheme = "#policescanner/wantedmusic_theme01.wav";
-PrecacheSound(pursuitTheme);
+//const pursuitTheme = "#policescanner/wantedmusic_theme01.wav";
+//PrecacheSound(pursuitTheme);
 
 enum eThreats
 {
