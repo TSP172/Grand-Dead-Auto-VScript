@@ -50,6 +50,7 @@ local AIType = 0;
 //AT MODES: 0 = Police/Law, 1 = Enemy, 2 = Avoid/Escape, 3 = Scripted, 4 = Neutral.
 local AIPatroling = false; //if we lost sigh of suspect start patrolling, ony valid if AIType set to 0.
 local AIActive = true;
+local nextEscapeRoute = 5.0;
 local searchRadius = 1000;
 local despawnRadius = 2000;
 local despawnIfNoEnemy = true;
@@ -110,13 +111,11 @@ local lawVehicles = ["models/tspvehicles/policecruiser_body.mdl", "models/tspveh
 function IsLawVehicle()
 {
     local myModel = self.GetModelName();
-    printl("[DEBUG] Checking model: " + myModel); // Prints what the engine sees
 
     foreach (modelPath in lawVehicles)
     {
         if (myModel == modelPath)
         {
-            printl("this is a law vehicle");
             return true;
         }
     }
@@ -124,15 +123,16 @@ function IsLawVehicle()
 }
 
 local ignoreMass = 16; //temp fucking fix to prevent swat vehicles roll over.
-local thrustPower = 12000;
+local thrustPower = 6000;
+local turnMultiplier = 5.0; //formerly 2.5
 
 if(!IsLawVehicle()) thrustPower = 3000;
 if(self.GetModelName() == "models/tspvehicles/swatvan_body.mdl") ignoreMass = 0;
 
 local thrustForward = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_forward", spawnflags = 26, forcetime = 0, force = thrustPower, attach1 = self.GetName(), angles = Vector(0, 180, 0)});
 local thrustBackward = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_backward", spawnflags = 26, forcetime = 0, force = thrustPower, attach1 = self.GetName(), angles = Vector(0, 0, 0)});
-local thrustLeft = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_left", spawnflags = 44 + ignoreMass, forcetime = 0, force = thrustPower * 2.5, attach1 = self.GetName(), angles = Vector(0, -90, 0)});
-local thrustRight = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_right", spawnflags = 44 + ignoreMass, forcetime = 0, force = thrustPower * 2.5, attach1 = self.GetName(), angles = Vector(0, -270, 0)});
+local thrustLeft = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_left", spawnflags = 44 + ignoreMass, forcetime = 0, force = thrustPower * turnMultiplier, attach1 = self.GetName(), angles = Vector(0, -90, 0)});
+local thrustRight = SpawnEntityFromTable("phys_thruster", {targetname = self.GetName() + "_right", spawnflags = 44 + ignoreMass, forcetime = 0, force = thrustPower * turnMultiplier, attach1 = self.GetName(), angles = Vector(0, -270, 0)});
 local env_weaponfire = null;
 
 //printl(self.GetName());
@@ -535,7 +535,7 @@ function BlowUpVehicle()
 
     isDestroyed = true;
 
-    self.SetVelocity(Vector(0, 0, 3000));   
+    //self.SetVelocity(Vector(0, 0, 3000));   
 
     if(wantedLevelScript != null)
     {
@@ -551,6 +551,26 @@ function BlowUpVehicle()
     DoEntFire("!self", "color", "0 0 0", 0.00, null, self);
     DoEntFire("!self", "Explode", "", 0.05, null, explosionEntity);
     DoEntFire("!self", "Kill", "", 5, null, explosionParticleEntity);
+
+    DoEntFire("!self", "FireUser1", "", 0, null, self); //fire OnUser1 inputs and kill these entities to prevent edict issues.
+    DoEntFire("!self", "Kill", "", 5, null, self);
+    
+    AddThinkToEnt(self, ""); //stop thinking.
+}
+
+function DeleteMe()
+{
+    if(wantedLevelScript != null)
+    {
+        DoEntFire("!self", "RunScriptCode", "PursuitVehicleReduceorAdd(-1)", 0, null, wantedLevelScript);
+    }
+
+    ForceEveryoneGetOut();
+
+    StopAmbientSoundOn("ambient/fire/interior_fireclose03_mono.wav", self);
+    StopAmbientSoundOn("sfx/vehicles/police_siren02.wav", self);
+
+    RemoveLocalMatchingConstraints(self, 150.0);
 
     DoEntFire("!self", "FireUser1", "", 0, null, self); //fire OnUser1 inputs and kill these entities to prevent edict issues.
     DoEntFire("!self", "Kill", "", 5, null, self);
@@ -679,7 +699,43 @@ function SelectRandomNavFromDistance(minDistance, maxDistance)
         local navCenter = navmesh.GetCenter();
         local dist = (navCenter - startPos).Length2D();
             
-        if (dist >= minDistance && dist <= maxDistance && (navmesh.GetAttributes() & 536870912) == 0) //navs marked with LYINGDOWN is forbidden.
+        if (dist >= minDistance && dist <= maxDistance && (navmesh.HasSpawnAttributes(1 << 19))) //navs marked with NO_THREAT is forbidden.
+        {
+            bestNavAreas.push(navmesh);
+        }
+    }
+        
+    if (bestNavAreas.len() > 0)
+    {
+        return bestNavAreas[RandomInt(0, bestNavAreas.len() - 1)].GetCenter();
+    }
+
+    return null;
+}
+
+
+function SelectRandomNavAwayFromPlayer(minDistance, maxDistance)
+{
+    local playerThreat = currentEnemy;
+    if (playerThreat == null) playerThreat = self; // Fallback
+
+    local threatPos = playerThreat.GetOrigin();
+    local startArea = NavMesh.GetNavArea(threatPos, 300);
+
+    local availableNavs = {};
+    local bestNavAreas = [];
+
+    if (startArea == null) return null;
+
+    NavMesh.GetNavAreasInRadius(startArea.GetCenter(), maxDistance, availableNavs);
+
+    foreach (navmesh in availableNavs)
+    {
+        local navCenter = navmesh.GetCenter();
+        local distFromThreat = (navCenter - threatPos).Length2D();
+            
+        // Pick nav areas that are far away from the player, avoiding restricted nav attributes
+        if (distFromThreat >= minDistance && distFromThreat <= maxDistance && (navmesh.GetAttributes() & 536870912) == 0)
         {
             bestNavAreas.push(navmesh);
         }
@@ -710,14 +766,7 @@ function AIUpdateNavigation()
     local myPos = self.GetOrigin();
     local dirToTarget = null;
 
-    if (AIType == 2) //are we fleeing?
-    {
-        dirToTarget = myPos - targetPos;
-    }
-    else //drive toward target
-    {
-        dirToTarget = targetPos - myPos;
-    }
+    dirToTarget = targetPos - myPos;
     
     dirToTarget.z = 0.0;
     
@@ -770,7 +819,7 @@ function AIUpdateNavigation()
             if (distanceMoved < 5.0)
             {
                 stuckTimer -= 1.0;
-                printl("[STUCK CHECK] Car barely moved (" + distanceMoved + " units). Stuck timer at: " + stuckTimer);
+                //printl("[STUCK CHECK] Car barely moved (" + distanceMoved + " units). Stuck timer at: " + stuckTimer);
             }
             else
             {
@@ -862,10 +911,13 @@ function SpawnInfectedAndStopTheCar()
     AddThinkToEnt(self, "") //since we got out of car, the car stops thinking
 }
 
+
 function CreatePathLegacy(navOrigin)
 {   
-    local endArea = NavMesh.GetNavArea(self.GetOrigin(), 120); //reversed because this stupid navareabuildpath function puts in reverse order.
-    local startArea  = NavMesh.GetNavArea(navOrigin, 120);
+    local endArea = NavMesh.GetNavArea(self.GetOrigin(), 120); // reversed because navareabuildpath builds in reverse order.
+    local startArea = NavMesh.GetNavArea(navOrigin, 540);
+
+    local carName = self.GetName();
 
     if (startArea && endArea)
     {
@@ -875,8 +927,34 @@ function CreatePathLegacy(navOrigin)
         {
             NavMesh.GetNavAreasFromBuildPath(startArea, endArea, endArea.GetCenter(), 99999.0, 0, false, tempTable);
                 
-            currentWayPointC = []; // Clear current path
+            local hasForbiddenArea = false;
+
+            for (local i = 0; i < tempTable.len(); i++)
+            {
+                local key = "area" + i;
+                if (key in tempTable)
+                {
+                    if (tempTable[key].HasSpawnAttributes(1 << 19)) //NO_THREAT
+                    {
+                        hasForbiddenArea = true;
+                        break;
+                    }
+                }
+            }
+
+            if (hasForbiddenArea)
+            {
+                currentWayPointC = [];
+                currentWayPoint = null; 
                 
+                DoEntFire(carName + "_left", "Deactivate", "", 0.0, null, self);
+                DoEntFire(carName + "_right", "Deactivate", "", 0.0, null, self);
+                DoEntFire(carName + "_forward", "Deactivate", "", 0.0, null, self);
+                DoEntFire(carName + "_backward", "Activate", "", 0.0, null, self);
+                return;
+            }
+
+            currentWayPointC = [];
             for (local i = 0; i < tempTable.len(); i++)
             {
                 local key = "area" + i;
@@ -888,6 +966,15 @@ function CreatePathLegacy(navOrigin)
 
             currentPathIndex = 0;
         }
+    }
+    else 
+    {
+        currentWayPointC = [];
+        currentWayPoint = null;
+        DoEntFire(carName + "_left", "Deactivate", "", 0.0, null, self);
+        DoEntFire(carName + "_right", "Deactivate", "", 0.0, null, self);
+        DoEntFire(carName + "_forward", "Deactivate", "", 0.0, null, self);
+        DoEntFire(carName + "_backward", "Deactivate", "", 0.0, null, self);
     }
 }
 
@@ -924,6 +1011,38 @@ function SetNextPath()
         }
     }
     return true;
+}
+
+function DebugCreatePath(end)
+{
+    local startArea = NavMesh.GetNearestNavArea(self.GetOrigin(), 300, true, true);
+    local endArea = NavMesh.GetNearestNavArea(end, 300, true, true);
+    DebugDrawBox(endArea.GetCenter(), Vector(-10, -10, -10), Vector(10, 10, 10), 0, 255, 0, 255, 5.0)
+    DebugDrawBox(startArea.GetCenter(), Vector(-10, -10, -10), Vector(10, 10, 10), 255, 0, 0, 255, 5.0)
+
+    if (startArea && endArea)
+    {
+        local myPathArray = {}; 
+
+        if (NavMesh.NavAreaBuildPath(startArea, endArea, endArea.GetCenter(), 99999.0, 0, false))
+        {
+            NavMesh.GetNavAreasFromBuildPath(startArea, endArea, endArea.GetCenter(), 99999.0, 0, false, myPathArray);
+            
+            printl("DEBUG: Found " + myPathArray.len() + " areas.");
+            
+            foreach(index, area in myPathArray)
+            {
+                DebugDrawBox(area.GetCenter(), Vector(-5, -5, -5), Vector(5, 5, 5), 0, 255, 255, 255, 5.0);
+                printl("INDEX: " + index);
+                printl("AREA: " + area);
+                printl("AREA ORIGIN: " + area.GetCenter());
+            }
+        }
+        else
+        {
+            printl("DEBUG: Path build failed even with 0 flags.");
+        }
+    }
 }
 
 function VehicleThink()
@@ -1035,7 +1154,7 @@ function VehicleThink()
                 return 0.05;
             }
         }
-        else if (currentEnemy != null && AIType < 3) //we have enemy and in on pursuit.
+        else if (currentEnemy != null && AIType < 2) //we have enemy and in on pursuit.
         {
             if(nextWayPointTimer <= 0)
             {
@@ -1086,6 +1205,27 @@ function VehicleThink()
                     nextWayPointTimer -= 0.05;
                 }
             }   
+        }
+        else if (AIType == 2) // Fleeing / Panicked mode
+        {
+            if(currentWayPointC.len() != 0 && currentEnemy != null && nextEscapeRoute > 0)
+            {
+                currentWayPoint = currentWayPointC[0].GetCenter();
+                SetNextPath();
+                AIUpdateNavigation();
+                //DebugDrawBox(currentWayPoint, Vector(-10, -10, 10), Vector(10, 10, 10), 255, 255, 255, 255, 1.0);
+            }
+            else if ((currentWayPointC.len() == 0 && currentEnemy == null) || nextEscapeRoute <= 0)
+            {
+                nextEscapeRoute = 5.0;
+                CreatePathLegacy(SelectRandomNavAwayFromPlayer(6000, 15000));
+            }
+            else
+            {
+                nextEscapeRoute -= 0.05;
+                CreatePathLegacy(SelectRandomNavAwayFromPlayer(6000, 15000));
+            }
+
         }
         else if (AIType == 4) //we are wandering/neutral
         {
@@ -1165,10 +1305,4 @@ function SetSpeedScale(newSpeed = 8000)
         }   
     }
 }
-
-function DebugRemoveGas()
-{
-    vehicleFuel = 35;
-}
-
 AddThinkToEnt(self, "VehicleThink");

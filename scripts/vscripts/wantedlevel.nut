@@ -365,7 +365,7 @@ function SurvivorsHiding(_toggle = 0)
     allSurvivorsHiding = _toggle == 1 ? true : false;
 
     local ent = null;
-    while ((ent = Entities.FindByClassname(ent, "prop_physics")) != null)
+    while ((ent = Entities.FindByClassname(ent, "prop_physics_multiplayer")) != null)
     {
         if (ent.IsValid() && ent.ValidateScriptScope())
         {
@@ -382,7 +382,7 @@ function SurvivorsHiding(_toggle = 0)
 function DeletePoliceVehicles()
 {
     local ent = null;
-    while ((ent = Entities.FindByClassname(ent, "prop_physics")) != null)
+    while ((ent = Entities.FindByClassname(ent, "prop_physics_multiplayer")) != null)
     {
         if (ent.IsValid() && ent.ValidateScriptScope())
         {
@@ -390,13 +390,9 @@ function DeletePoliceVehicles()
             
             if (policeScope != null)
             {
-                if ("BlowUpVehicle" in policeScope)
+                if ("DeleteMe" in policeScope)
                 {
-                    DoEntFire("!self", "RunScriptCode", "BlowUpVehicle()", 0.02, null, ent);
-                }
-                else
-                {
-                    DoEntFire("!self", "FireUser1", "", 0.02, null, ent);
+                    DoEntFire("!self", "RunScriptCode", "DeleteMe()", 0.02, null, ent);
                 }
             }
         }
@@ -433,7 +429,7 @@ function SelectRandomNavFromDistance(minDistance, maxDistance, survivor)
         local navCenter = navmesh.GetCenter();
         local dist = (navCenter - startPos).Length2D();
             
-        if (dist >= minDistance && dist <= maxDistance && (navmesh.GetAttributes() & 536870912) == 0) //navs marked with LYINGDOWN is forbidden.
+        if (dist >= minDistance && dist <= maxDistance && !navmesh.HasSpawnAttributes(1 << 19)) //navs marked with NO_THREAT is forbidden.
         {
             bestNavAreas.push(navmesh);
         }
@@ -445,22 +441,6 @@ function SelectRandomNavFromDistance(minDistance, maxDistance, survivor)
     }
 
     return null;
-}
-
-function SpawnPoliceCar(spawnPoint)
-{
-    if (selectedSpawner == null || !selectedSpawner.IsValid()) return;
-
-    selectedSpawner.SetOrigin(spawnPoint.GetCenter() + Vector(0, 0, 10));
-    
-    selectedSpawner.SetAngles(QAngle(0, RandomInt(0, 360), 0)); 
-    
-    // Force the entity template to spawn the car
-    DoEntFire("!self", "ForceSpawn", "", 0.0, null, selectedSpawner);
-
-    DoEntFire("!self", "RunScriptCode", "InitializeSpawnedCarThrusters()", 0.05, null, selectedSpawner);
-    
-    activePursuitVehicles++;
 }
 
 function WantedLevelThink()
@@ -644,6 +624,29 @@ function DebugBringItOn()
     SetHeat(1300)
     maxAllowedVehicles = 15;
 }
+
+function DebugShowNavAttributes()
+{
+    local startPos = GetListenServerHost().GetOrigin();
+    local availableAreas = {}; 
+
+    NavMesh.GetNavAreasInRadius(startPos, 5000, availableAreas);
+
+    if (availableAreas.len() > 0)
+    {
+        local navList = [];
+        foreach (navHandle in availableAreas)
+        {
+            if ((navHandle.HasSpawnAttributes(1 << 19)))
+            {
+                //DebugDrawText(navHandle.GetCenter(), navHandle.GetAttributes().tostring(), false, 5.0);
+                DebugDrawBox(navHandle.GetCenter(), Vector(-15, -15, -15), Vector(15, 15, 15), 255, 255, 255, 255, 5.0)
+            }
+        }
+    }
+    return null;
+}
+
 
 AddThinkToEnt(self, "WantedLevelThink");
 __CollectGameEventCallbacks(this);
