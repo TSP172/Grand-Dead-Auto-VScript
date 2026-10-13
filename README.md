@@ -11,7 +11,7 @@ L4D2 VScript mod that includes driveable vehicle, wanted level system and police
 - Fleeing/Coward AI (can be used for custom scenarios)
 - Neutral/Freeroam AI (can be used for detailing)
 - Nav mesh spawning and despawning
-- Marking forbidden spawn areas as "LYING_DOWN" Left 4 Dead 2 Nav Attribute.
+- Marking forbidden spawn areas and forbidden paths as "NOTHREAT" Left 4 Dead 2 Nav Attribute.
 
 # Yet to be added:
 - .vmf instance of how to make your own vehicles both player controllable vehicle and NPC only vehicle
