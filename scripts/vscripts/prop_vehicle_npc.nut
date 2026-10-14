@@ -682,7 +682,7 @@ function ClearStuckStatus()
 function SelectRandomNavFromDistance(minDistance, maxDistance)
 {
     local startPos = self.GetOrigin()
-    local startArea = NavMesh.GetNavArea(startPos, 200);
+    local startArea = NavMesh.GetNearestNavArea(startPos, 300, false, false) //UPDATED
 
     local availableNavs = {};
     local bestNavAreas = [];
@@ -720,7 +720,7 @@ function SelectRandomNavAwayFromPlayer(minDistance, maxDistance)
     if (playerThreat == null) playerThreat = self; // Fallback
 
     local threatPos = playerThreat.GetOrigin();
-    local startArea = NavMesh.GetNavArea(threatPos, 300);
+    local startArea = NavMesh.GetNearestNavArea(threatPos, 300, false, false); //UPDATED
 
     local availableNavs = {};
     local bestNavAreas = [];
@@ -915,7 +915,7 @@ function SpawnInfectedAndStopTheCar()
 function CreatePathLegacy(navOrigin)
 {   
     local endArea = NavMesh.GetNavArea(self.GetOrigin(), 120); // reversed because navareabuildpath builds in reverse order.
-    local startArea = NavMesh.GetNavArea(navOrigin, 540);
+    local startArea = NavMesh.GetNavArea(navOrigin, 100); // <- FIX ME!
 
     local carName = self.GetName();
 
@@ -1045,9 +1045,14 @@ function DebugCreatePath(end)
     }
 }
 
+function SetAIState(value = 1)
+{
+    AIActive = value == 1 ? true : false;
+}
+
 function VehicleThink()
 {
-    if (isDestroyed) return 1.0;
+    if (isDestroyed || !AIActive) return 1.0;
 
     foreach (slot, player in playersInVehicle)
     {
@@ -1264,6 +1269,7 @@ function SetCustomPaintJob(r = 255, g = 255, b = 255)
 function SetAIConfig(_ai = 0, searchRad = 1000, infected = 8, infamount = 2)
 {
     AIType = _ai; //AI MODE: 0 = Law, 1 = Enemy, 2 = Flee, 3 = Scripted, 4 = Neutral/Civilian
+    self.SetContext("VehicleAIMode", _ai.tostring(), -1);
     if(AIType > 1)
     {
         turnAngleThreshold = 0.0;  

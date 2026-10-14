@@ -384,7 +384,7 @@ function DeletePoliceVehicles()
     local ent = null;
     while ((ent = Entities.FindByClassname(ent, "prop_physics_multiplayer")) != null)
     {
-        if (ent.IsValid() && ent.ValidateScriptScope())
+        if (ent.IsValid() && ent.ValidateScriptScope() && ent.GetContext("VehicleAIMode") == "0")
         {
             local policeScope = ent.GetScriptScope();
             
